@@ -1,5 +1,7 @@
 // 3rd party
 const browserslist = require('browserslist');
+const Fs = require('fs').promises;
+const Path = require('path');
 // user
 const {LOG_ERROR} = require('./constants');
 const {getModules} = require('./module-resolver');
@@ -106,6 +108,52 @@ async function primeCache(logger) {
     return webpacknimbuild.cache.keys().length;
 }
 
+/**
+ * Serializes the cache's entries as JSON files in the provided directory.
+ * @param directory
+ * @returns {Promise<unknown[]>}
+ */
+async function serializeCache(directory) {
+    const promises = [];
+
+    webpacknimbuild.cache.keys().forEach((key) => {
+        const entry = webpacknimbuild.cache.get(key);
+        const serializedEntry = JSON.stringify(entry);
+        const filepath = Path.resolve(directory, `${key}.json`);
+        const promise = Fs.writeFile(filepath, serializedEntry);
+
+        promises.push(promise);
+    });
+
+    return await Promise.all(promises);
+}
+
+/**
+ * Deserializes the cache from the JSON files in the provided directory.
+ * @param directory
+ * @returns {Promise<unknown[]>}
+ */
+async function deserializeCache(directory) {
+    const files = await Fs.readdir(directory);
+    const promises = [];
+
+    async function deserialize(directory, file) {
+        const fullPath = Path.resolve(directory, file);
+        const key = Path.basename(file, '.json');
+        const serializedEntry = await Fs.readFile(fullPath, 'utf8');
+        const entry = JSON.parse(serializedEntry);
+
+        webpacknimbuild.cache.set(key, entry);
+    }
+
+    files.forEach((file) => {
+        const promise = deserialize(directory, file);
+        promises.push(promise);
+    });
+
+    return await Promise.all(promises);
+}
+
 module.exports = {
     getPolyfillString,
     addSupported,
@@ -113,5 +161,8 @@ module.exports = {
     primeCache,
     clearCache: () => {
         webpacknimbuild.cache.reset();
-    }
+    },
+    getCache: () => webpacknimbuild.cache,
+    serializeCache,
+    deserializeCache
 };

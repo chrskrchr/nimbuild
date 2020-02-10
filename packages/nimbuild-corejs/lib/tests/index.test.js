@@ -1,4 +1,8 @@
-const {getPolyfillString, clearCache, primeCache} = require('../index');
+const _ = require('lodash');
+const Fs = require('fs').promises;
+const Os = require('os');
+const Path = require('path');
+const {getPolyfillString, clearCache, primeCache, getCache, serializeCache, deserializeCache} = require('../index');
 const {getSupported} = require('../supported-sets');
 const mockuas = require('../mocks/ua.mock');
 
@@ -27,6 +31,7 @@ describe('index.js', () => {
     let mockLogger;
     let include;
     let exclude;
+    let tempDirs;
 
     beforeEach(() => {
         clearCache();
@@ -39,6 +44,13 @@ describe('index.js', () => {
         });
         include = featureSet.include;
         exclude = featureSet.exclude;
+        tempDirs = [];
+    });
+
+    afterEach(() => {
+        tempDirs.forEach((tempDir) => {
+            Fs.rmdir(tempDir, {recursive: true});
+        });
     });
 
     it('handles UA not defined in browserlist', async () => {
@@ -183,4 +195,42 @@ describe('index.js', () => {
         expect(cacheLength).toEqual(98);
         done();
     }, 120000);
+
+    it('serializes and deserializes the cache', async () => {
+        for (let i = 0; i < mockuas.oddGroup.length; i++) {
+            await getPolyfillString({
+                include,
+                exclude,
+                uaString: mockuas.oddGroup[i],
+                minify: true,
+                logger: mockLogger
+            });
+        }
+
+        const cache = getCache();
+        expect(cache.keys().length).toEqual(3);
+
+        // make a copy of the cache's values
+        const clonedCache = {};
+        cache.keys().forEach((key) => {
+            clonedCache[key] = _.cloneDeep(cache.get(key));
+        });
+
+        // serialize the cache
+        const tempDir = await Fs.mkdtemp(Path.join(Os.tmpdir(), 'cache-'));
+        tempDirs.push(tempDir);
+
+        await serializeCache(tempDir);
+
+        // reset the cache
+        clearCache();
+        expect(cache.keys().length).toEqual(0);
+
+        // deserialize the cache and assert we got back the same cache
+        await deserializeCache(tempDir);
+        expect(cache.keys().length).toEqual(3);
+        cache.keys().forEach((key) => {
+            expect(cache.get(key)).toEqual(clonedCache[key]);
+        });
+    }, 20000);
 });
